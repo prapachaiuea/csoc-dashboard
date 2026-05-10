@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+  <title>CSOC Dashboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet"/>
+  <link rel="stylesheet" href="/static/style.css"/>
+</head>
+<body>
+
+<!-- ── Sidebar ── -->
+<aside class="sidebar">
+  <div class="sidebar-logo">
+    <img src="/static/logo.png" alt="CSOC" class="sidebar-logo-img" onerror="this.style.display='none'"/>
+    <div class="sidebar-logo-text">
+      <div class="sidebar-title">CSOC</div>
+      <div class="sidebar-sub">Operations Center</div>
+    </div>
+  </div>
+
+  <nav class="sidebar-nav">
+    <div class="nav-label">TOOLS</div>
+
+    <button class="nav-item active" onclick="showPage('monitor')" id="nav-monitor">
+      <span class="nav-icon">📡</span>
+      <span class="nav-text">IT Monitor</span>
+      <span class="nav-dot" id="dot-monitor"></span>
+    </button>
+
+    <button class="nav-item" onclick="showPage('shift')" id="nav-shift">
+      <span class="nav-icon">📊</span>
+      <span class="nav-text">Shift Summary</span>
+      <span class="nav-dot" id="dot-shift"></span>
+    </button>
+
+    <button class="nav-item" onclick="showPage('scraper')" id="nav-scraper">
+      <span class="nav-icon">🕷️</span>
+      <span class="nav-text">PromptCare Scraper</span>
+      <span class="nav-dot" id="dot-scraper"></span>
+    </button>
+
+    <button class="nav-item" onclick="showPage('weekly')" id="nav-weekly">
+      <span class="nav-icon">📅</span>
+      <span class="nav-text">Weekly Summary</span>
+      <span class="nav-dot" id="dot-weekly"></span>
+    </button>
+  </nav>
+
+  <div class="sidebar-footer">
+    <div class="shift-badge" id="shiftBadge">— Shift</div>
+    <div class="clock" id="clock">00:00:00</div>
+    <button class="btn-restart" id="restart-btn" onclick="restartServer()">↺ Restart</button>
+  </div>
+</aside>
+
+<!-- ── Main ── -->
+<div class="main-wrap">
+
+  <!-- ── IT Monitor ── -->
+  <section class="page active" id="page-monitor">
+    <div class="page-header">
+      <div>
+        <h1 class="page-title">📡 IT Monitor</h1>
+        <p class="page-desc">Polls Splunk SOAR every 40 s — sends Pushover alerts for unattended or critical incidents.</p>
+      </div>
+      <div class="status-pill offline" id="status-monitor">
+        <span class="dot"></span><span class="label">Offline</span>
+      </div>
+    </div>
+    <div class="action-bar">
+      <button class="btn btn-green" id="monitor-start" onclick="monitorStart()">▶ Start</button>
+      <button class="btn btn-red"   id="monitor-stop"  onclick="monitorStop()" disabled>■ Stop</button>
+      <button class="btn btn-ghost" onclick="clearLog('monitor')">Clear log</button>
+    </div>
+    <div class="terminal" id="log-monitor">
+      <span class="terminal-placeholder">Waiting for monitor to start…</span>
+    </div>
+  </section>
+
+  <!-- ── Shift Summary ── -->
+  <section class="page" id="page-shift">
+    <div class="page-header">
+      <div>
+        <h1 class="page-title">📊 Shift Summary</h1>
+        <p class="page-desc">Fetches SOAR + SIEM data for the current shift, generates charts and a formatted Excel handoff report.</p>
+      </div>
+      <div class="status-pill idle" id="status-shift">
+        <span class="dot"></span><span class="label">Idle</span>
+      </div>
+    </div>
+    <div class="action-bar">
+      <button class="btn btn-purple" id="shift-run"  onclick="shiftRun()">▶ Run Report</button>
+      <button class="btn btn-red"    id="shift-stop" onclick="shiftStop()" disabled>■ Stop</button>
+      <button class="btn btn-teal"   id="shift-dl"   onclick="download('shift')" disabled>↓ Download Latest</button>
+      <button class="btn btn-ghost"  onclick="clearLog('shift')">Clear log</button>
+    </div>
+    <div class="file-hint" id="shift-files-hint"></div>
+    <div class="terminal" id="log-shift">
+      <span class="terminal-placeholder">Click Run Report to generate the shift handoff…</span>
+    </div>
+  </section>
+
+  <!-- ── PromptCare Scraper ── -->
+  <section class="page" id="page-scraper">
+    <div class="page-header">
+      <div>
+        <h1 class="page-title">🕷️ PromptCare Scraper <span class="badge-beta">Beta</span></h1>
+        <p class="page-desc">Logs into PromptCare and extracts ticket history in parallel, outputs a color-coded Excel report.</p>
+      </div>
+      <div class="status-pill idle" id="status-scraper">
+        <span class="dot"></span><span class="label">Idle</span>
+      </div>
+    </div>
+
+    <div class="scraper-layout">
+      <div class="scraper-input-col">
+        <div class="field-label">Ticket IDs <span class="field-hint">— one per line, or leave blank to use existing Ticket.txt</span></div>
+        <textarea id="ticket-input" class="ticket-input"
+          placeholder="INC123456&#10;INC789012&#10;…" spellcheck="false"></textarea>
+        <div class="ticket-meta">
+          <button class="btn btn-ghost btn-sm" onclick="loadTickets()">Load from file</button>
+          <button class="btn btn-ghost btn-sm" onclick="clearTickets()">Clear</button>
+          <span class="ticket-count" id="ticketCount">0 tickets</span>
+        </div>
+      </div>
+      <div class="scraper-action-col">
+        <button class="btn btn-purple btn-lg" id="scraper-run"  onclick="scraperRun()">▶ Run Scraper</button>
+        <button class="btn btn-red"           id="scraper-stop" onclick="scraperStop()" disabled>■ Stop</button>
+        <button class="btn btn-teal btn-lg"   id="scraper-dl"   onclick="download('scraper')" disabled>↓ Download Excel</button>
+        <button class="btn btn-ghost"         onclick="clearLog('scraper')">Clear log</button>
+      </div>
+    </div>
+    <div class="terminal terminal-short" id="log-scraper">
+      <span class="terminal-placeholder">Enter ticket IDs and click Run Scraper…</span>
+    </div>
+  </section>
+
+  <!-- ── Weekly Summary ── -->
+  <section class="page" id="page-weekly">
+    <div class="page-header">
+      <div>
+        <h1 class="page-title">📅 Weekly Summary</h1>
+        <p class="page-desc">Processes weekly incident data into 7 categorized Excel reports by log source and status.</p>
+      </div>
+      <div class="status-pill idle" id="status-weekly">
+        <span class="dot"></span><span class="label">Idle</span>
+      </div>
+    </div>
+
+    <div class="weekly-steps">
+      <!-- Step 1 -->
+      <div class="step-card">
+        <div class="step-num">1</div>
+        <div class="step-body">
+          <div class="step-title">Upload data file</div>
+          <div class="step-desc">Upload <code>data.ods</code> or drop it here.</div>
+          <label for="ods-upload" class="upload-label" id="ods-upload-label">
+            <span class="upload-text">📁 Choose file or drag</span>
+            <input type="file" id="ods-upload" accept=".ods" style="display:none"/>
+          </label>
+          <div class="ods-status" id="ods-status">Checking…</div>
+        </div>
+      </div>
+      <!-- Step 2 -->
+      <div class="step-card">
+        <div class="step-num">2</div>
+        <div class="step-body">
+          <div class="step-title">Extract &amp; Process</div>
+          <div class="step-desc">Runs all 9 extraction scripts — ExtraHop, CrowdStrike, Splunk, Cymulate, charts.</div>
+          <button class="btn btn-purple" id="weekly-stage1" onclick="weeklyStage1()">▶ Run Stage 1</button>
+        </div>
+      </div>
+      <!-- Step 3 -->
+      <div class="step-card">
+        <div class="step-num">3</div>
+        <div class="step-body">
+          <div class="step-title">Build Presentation</div>
+          <div class="step-desc">Converts ODS files into styled Excel reports in the <code>Presentation Final</code> folder.</div>
+          <button class="btn btn-purple" id="weekly-stage2" onclick="weeklyStage2()">▶ Run Stage 2</button>
+        </div>
+      </div>
+      <!-- Step 4 -->
+      <div class="step-card">
+        <div class="step-num">4</div>
+        <div class="step-body">
+          <div class="step-title">Download Reports</div>
+          <div class="step-desc">Downloads all 7 Excel files as a ZIP archive.</div>
+          <div class="xlsx-status" id="xlsx-status"></div>
+          <button class="btn btn-teal" id="weekly-dl" onclick="download('weekly')" disabled>↓ Download ZIP</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="action-bar" style="margin-top:4px">
+      <button class="btn btn-red"   id="weekly-stop" onclick="weeklyStop()" disabled>■ Stop</button>
+      <button class="btn btn-ghost" onclick="clearLog('weekly')">Clear log</button>
+    </div>
+    <div class="terminal terminal-short" id="log-weekly">
+      <span class="terminal-placeholder">Ready — follow the steps above…</span>
+    </div>
+  </section>
+
+</div><!-- /main-wrap -->
+
+<!-- ── Server Log Bar ── -->
+<div class="server-log-bar" onclick="toggleServerLog()">
+  <span class="server-log-label">⬡ Server Log</span>
+  <span class="server-log-arrow" id="serverLogArrow">▲</span>
+</div>
+<div class="server-log-panel" id="serverLogPanel">
+  <div class="terminal terminal-server" id="log-server">
+    <span class="terminal-placeholder">Flask request log…</span>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+<script src="/static/app.js"></script>
+</body>
+</html>

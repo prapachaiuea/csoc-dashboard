@@ -8,7 +8,7 @@ A local Flask web dashboard that brings all CSOC daily tools into one browser ta
 
 - **IT Monitor** — Start/stop the SOAR alert monitor, view live log stream
 - **PromptCare Scraper** — Paste ticket IDs, run scraper, download color-coded Excel report
-- **Shift Summary** — Generate shift handoff Excel report in one click
+- **Shift Summary** — Generate shift handoff Excel report in one click (parallel fetch — faster)
 - **Weekly Summary** — Upload `data.ods`, run Stage 1 + Stage 2, download ZIP of all reports
 - Real-time log streaming via Server-Sent Events (SSE)
 - One-click server restart from the browser
@@ -54,6 +54,30 @@ Double-click `launch_silent.vbs`.
 | Click **↺ Restart** in the dashboard header | Normal daily use |
 | Double-click `restart.bat` | If the browser won't load |
 | Double-click `run.bat` | Debug mode (shows terminal) |
+
+---
+
+## Tool Updates
+
+### Shift Summary — Parallel Fetch
+After Splunk login, three tracks run concurrently via `asyncio`:
+- **Track A** — SOAR incidents (plain `requests` call)
+- **Track B** — All SPL jobs submitted, polled, and fetched simultaneously
+- **Track C** — All dashboard pages opened in parallel browser tabs
+
+Night shift is ~5–10 min faster. Day shift is moderately faster.
+
+### PromptCare Scraper — Stepped Retry
+Page load wait now scales per attempt instead of being fixed:
+
+| Attempt | Page load wait |
+|---------|---------------|
+| 1 | 5 s |
+| 2 | 10 s |
+| 3 | 15 s |
+| 4+ | 30 s (capped) |
+
+Retries indefinitely — no longer gives up after 3 attempts.
 
 ---
 

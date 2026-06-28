@@ -6,12 +6,12 @@ A local Flask web dashboard that brings all CSOC daily tools into one browser ta
 
 ## Features
 
-- **IT Monitor** — Start/stop the SOAR alert monitor, view live log stream
+- **IT Monitor** — Start/stop the SOAR alert monitor, view live log stream; toggle new-case arrival alerts ON/OFF without restarting
 - **PromptCare Scraper** — Paste ticket IDs, run scraper, download color-coded Excel report
-- **Shift Summary** — Generate shift handoff Excel report in one click (parallel fetch — faster)
+- **Shift Summary** — Generate shift handoff Excel report with optional date/shift override; download each phase as it completes (no waiting for all 3)
 - **Weekly Summary** — Upload `data.ods`, run Stage 1 + Stage 2, download ZIP of all reports
 - Real-time log streaming via Server-Sent Events (SSE)
-- One-click server restart from the browser
+- One-click server restart or full shutdown from the browser
 - Dark glassmorphism UI
 
 ---
@@ -57,7 +57,18 @@ Double-click `launch_silent.vbs`.
 
 ---
 
-## Tool Updates
+## Tool Notes
+
+### Shift Summary — Phase Downloads
+The shift summary runs three parallel phases. Each phase's Excel file becomes available for download **as soon as that phase finishes** — you don't have to wait for all three:
+
+| Phase | Contents |
+|-------|---------|
+| 1 — SOAR | Incident highlight table from SOAR |
+| 2 — SPL | SIEM event/alert counts from Splunk |
+| 3 — Screenshots | Dashboard chart screenshots embedded |
+
+You can also set a **date and shift override** from the dashboard UI (useful for generating yesterday's night-shift report during day shift).
 
 ### Shift Summary — Parallel Fetch
 After Splunk login, three tracks run concurrently via `asyncio`:
@@ -66,6 +77,9 @@ After Splunk login, three tracks run concurrently via `asyncio`:
 - **Track C** — All dashboard pages opened in parallel browser tabs
 
 Night shift is ~5–10 min faster. Day shift is moderately faster.
+
+### IT Monitor — New Case Alert Toggle
+The new case arrival alert can be toggled ON/OFF from the dashboard without restarting the monitor. State is saved in `IT_MONITOR/monitor_config.json`.
 
 ### PromptCare Scraper — Stepped Retry
 Page load wait now scales per attempt instead of being fixed:

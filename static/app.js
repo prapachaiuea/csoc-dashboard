@@ -121,6 +121,7 @@ function appendLog(tool, ts, msg) {
       setNavDot(tool, 'error');
     }
     setRunning(tool, false);
+    if (tool === 'shift') { stopPhasePolling(); pollShiftPhases(); }
   }
 
   c.scrollTop = c.scrollHeight;
@@ -197,16 +198,150 @@ async function monitorStop() {
   toast('Stop signal sent', 'info');
 }
 
+/* ── Shift Calendar ──────────────────────────────────── */
+let _calYear, _calMonth, _calDate = null, _calShift = null;
+
+const _CAL_MONTHS = [
+  'January','February','March','April','May','June',
+  'July','August','September','October','November','December'
+];
+
+function calInit() {
+  const now = new Date();
+  _calYear  = now.getFullYear();
+  _calMonth = now.getMonth();
+  calRender();
+}
+
+function calPrev() {
+  _calMonth--;
+  if (_calMonth < 0) { _calMonth = 11; _calYear--; }
+  calRender();
+}
+
+function calNext() {
+  _calMonth++;
+  if (_calMonth > 11) { _calMonth = 0; _calYear++; }
+  calRender();
+}
+
+function calRender() {
+  document.getElementById('calMonthLabel').textContent =
+    `${_CAL_MONTHS[_calMonth]} ${_calYear}`;
+
+  const container  = document.getElementById('calDays');
+  container.innerHTML = '';
+
+  const firstDow  = new Date(_calYear, _calMonth, 1).getDay();
+  const daysInMth = new Date(_calYear, _calMonth + 1, 0).getDate();
+  const today     = new Date();
+
+  for (let i = 0; i < firstDow; i++) {
+    const b = document.createElement('div');
+    b.className = 'cal-day blank';
+    container.appendChild(b);
+  }
+
+  for (let d = 1; d <= daysInMth; d++) {
+    const cell    = document.createElement('button');
+    const dateStr = `${_calYear}-${String(_calMonth + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+    cell.textContent = d;
+    cell.className   = 'cal-day';
+    if (d === today.getDate() && _calMonth === today.getMonth() && _calYear === today.getFullYear())
+      cell.classList.add('today');
+    if (_calDate === dateStr)
+      cell.classList.add('selected');
+    cell.onclick = () => calSelectDate(dateStr);
+    container.appendChild(cell);
+  }
+}
+
+function calSelectDate(dateStr) {
+  _calDate = (_calDate === dateStr) ? null : dateStr;
+  calRender();
+  calUpdateSelection();
+}
+
+function calSelectShift(shift) {
+  _calShift = (_calShift === shift) ? null : shift;
+  document.getElementById('calBtnDay').classList.toggle('active', _calShift === 'Day');
+  document.getElementById('calBtnNight').classList.toggle('active', _calShift === 'Night');
+  calUpdateSelection();
+}
+
+function calClear() {
+  _calDate  = null;
+  _calShift = null;
+  document.getElementById('calBtnDay').classList.remove('active');
+  document.getElementById('calBtnNight').classList.remove('active');
+  calRender();
+  calUpdateSelection();
+}
+
+function calUpdateSelection() {
+  const el = document.getElementById('calSelection');
+  if (!_calDate && !_calShift) {
+    el.innerHTML = '<span class="cal-sel-none">No override — auto-detect</span>';
+    return;
+  }
+  const dateHtml  = _calDate
+    ? `<span class="cal-sel-date">&#128197; ${_calDate}</span>`
+    : `<span class="cal-sel-date" style="color:var(--text-dimmer);font-style:italic">today</span>`;
+  const icon      = _calShift === 'Day' ? '&#9728;' : _calShift === 'Night' ? '&#9790;' : '';
+  const color     = _calShift === 'Day' ? 'var(--amber)' : _calShift === 'Night' ? 'var(--indigo)' : 'var(--text-dim)';
+  const shiftHtml = _calShift
+    ? `<span class="cal-sel-shift" style="color:${color}">${icon} ${_calShift}</span>`
+    : `<span class="cal-sel-shift" style="color:var(--text-dimmer);font-style:italic">auto shift</span>`;
+  el.innerHTML = dateHtml + shiftHtml;
+}
+
 /* ── Shift Summary ───────────────────────────────────── */
+let _phasePoller = null;
+
+function startPhasePolling() {
+  stopPhasePolling();
+  _phasePoller = setInterval(pollShiftPhases, 3000);
+}
+
+function stopPhasePolling() {
+  if (_phasePoller) { clearInterval(_phasePoller); _phasePoller = null; }
+}
+
+async function pollShiftPhases() {
+  try {
+    const data = await fetch('/api/shift/phase-status').then(r => r.json());
+    [1, 2, 3].forEach(n => {
+      const btn = document.getElementById('shift-dl-' + n);
+      if (btn && data.phases[n]) btn.disabled = false;
+    });
+    if (!data.running) stopPhasePolling();
+  } catch (_) {}
+}
+
+function shiftDownloadPhase(n) {
+  window.location.href = '/api/shift/download/phase/' + n;
+}
+
 async function shiftRun() {
-  const res = await fetch('/api/shift/run', {method:'POST'}).then(r=>r.json());
+  const body = {};
+  if (_calDate)  body.date  = _calDate;
+  if (_calShift) body.shift = _calShift;
+  const res = await fetch('/api/shift/run', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(body),
+  }).then(r => r.json());
   if (!res.ok) { toast(res.reason || 'Already running', 'error'); return; }
   setPill('shift', 'running', 'Running');
   setNavDot('shift', 'running');
   setRunning('shift', true);
-  document.getElementById('shift-dl').disabled = true;
+  [1, 2, 3].forEach(n => {
+    const btn = document.getElementById('shift-dl-' + n);
+    if (btn) btn.disabled = true;
+  });
   toast('Shift summary started', 'ok');
   loadShiftFiles();
+  startPhasePolling();
 }
 
 async function shiftStop() {
@@ -268,6 +403,7 @@ function updateTicketCount() {
 document.addEventListener('DOMContentLoaded', () => {
   const ta = document.getElementById('ticket-input');
   if (ta) ta.addEventListener('input', updateTicketCount);
+  calInit();
   loadShiftFiles();
   checkWeeklyStatus();
   setupOdsUpload();
@@ -387,6 +523,16 @@ async function restartServer() {
   await fetch('/api/restart', {method:'POST'});
   toast('Restarting — reloading in 3s…', 'info');
   setTimeout(() => location.reload(), 3500);
+}
+
+/* ── Shutdown ────────────────────────────────────────── */
+async function shutdownServer() {
+  if (!confirm('Shutdown the dashboard server completely?\n\nThe page will stop working until you run it again.')) return;
+  const btn = document.getElementById('shutdown-btn');
+  btn.disabled = true;
+  btn.textContent = '⏻ Shutting down…';
+  try { await fetch('/api/shutdown', {method:'POST'}); } catch (_) {}
+  document.body.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100vh;font-family:monospace;color:#888;font-size:16px;">Server stopped. Close this tab.</div>';
 }
 
 /* ── Server Log Toggle ───────────────────────────────── */

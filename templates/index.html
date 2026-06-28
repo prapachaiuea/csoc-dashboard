@@ -53,6 +53,7 @@
     <div class="shift-badge" id="shiftBadge">— Shift</div>
     <div class="clock" id="clock">00:00:00</div>
     <button class="btn-restart" id="restart-btn" onclick="restartServer()">↺ Restart</button>
+    <button class="btn-shutdown" id="shutdown-btn" onclick="shutdownServer()">⏻ Shutdown</button>
   </div>
 </aside>
 
@@ -74,6 +75,7 @@
       <button class="btn btn-green" id="monitor-start" onclick="monitorStart()">▶ Start</button>
       <button class="btn btn-red"   id="monitor-stop"  onclick="monitorStop()" disabled>■ Stop</button>
       <button class="btn btn-ghost" onclick="clearLog('monitor')">Clear log</button>
+      <button class="btn btn-teal"  id="new-alert-btn" onclick="toggleNewAlert()">📥 New Alert: ON</button>
     </div>
     <div class="terminal" id="log-monitor">
       <span class="terminal-placeholder">Waiting for monitor to start…</span>
@@ -94,9 +96,51 @@
     <div class="action-bar">
       <button class="btn btn-purple" id="shift-run"  onclick="shiftRun()">▶ Run Report</button>
       <button class="btn btn-red"    id="shift-stop" onclick="shiftStop()" disabled>■ Stop</button>
-      <button class="btn btn-teal"   id="shift-dl"   onclick="download('shift')" disabled>↓ Download Latest</button>
+      <button class="btn btn-teal"   id="shift-dl-1" onclick="shiftDownloadPhase(1)" disabled>↓ Phase 1 SOAR</button>
+      <button class="btn btn-teal"   id="shift-dl-2" onclick="shiftDownloadPhase(2)" disabled>↓ Phase 2 Stats</button>
+      <button class="btn btn-teal"   id="shift-dl-3" onclick="shiftDownloadPhase(3)" disabled>↓ Phase 3 Final</button>
       <button class="btn btn-ghost"  onclick="clearLog('shift')">Clear log</button>
     </div>
+
+    <!-- ── Calendar / Date-Shift Override ── -->
+    <div class="shift-cal-card">
+      <div class="shift-cal-header">
+        <span class="shift-cal-title">DATE &amp; SHIFT OVERRIDE</span>
+        <span class="shift-cal-hint">Leave blank to auto-detect from current Bangkok time</span>
+        <button class="btn btn-ghost btn-sm" onclick="calClear()">Clear</button>
+      </div>
+      <div class="shift-cal-layout">
+
+        <!-- Calendar widget -->
+        <div class="cal-widget">
+          <div class="cal-nav">
+            <button class="cal-nav-btn" onclick="calPrev()">&#8249;</button>
+            <span class="cal-month-label" id="calMonthLabel"></span>
+            <button class="cal-nav-btn" onclick="calNext()">&#8250;</button>
+          </div>
+          <div class="cal-dow-row">
+            <span>Su</span><span>Mo</span><span>Tu</span>
+            <span>We</span><span>Th</span><span>Fr</span><span>Sa</span>
+          </div>
+          <div class="cal-days" id="calDays"></div>
+        </div>
+
+        <!-- Shift selector -->
+        <div class="cal-shift-col">
+          <div class="cal-shift-label">SHIFT TYPE</div>
+          <div class="cal-shift-btns">
+            <button class="cal-shift-btn cal-shift-day"   id="calBtnDay"   onclick="calSelectShift('Day')">&#9728; Day</button>
+            <button class="cal-shift-btn cal-shift-night" id="calBtnNight" onclick="calSelectShift('Night')">&#9790; Night</button>
+          </div>
+          <div class="cal-shift-note">Night shift: pick the evening start date</div>
+          <div class="cal-selection" id="calSelection">
+            <span class="cal-sel-none">No override — auto-detect</span>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
     <div class="file-hint" id="shift-files-hint"></div>
     <div class="terminal" id="log-shift">
       <span class="terminal-placeholder">Click Run Report to generate the shift handoff…</span>
@@ -218,5 +262,31 @@
 
 <div class="toast" id="toast"></div>
 <script src="/static/app.js"></script>
+<script>
+(function () {
+  function updateNewAlertBtn(enabled) {
+    const btn = document.getElementById('new-alert-btn');
+    if (!btn) return;
+    btn.textContent = '📥 New Alert: ' + (enabled ? 'ON' : 'OFF');
+    btn.className   = 'btn ' + (enabled ? 'btn-teal' : 'btn-ghost');
+  }
+
+  window.toggleNewAlert = async function () {
+    try {
+      const r = await fetch('/api/monitor/toggle-new-alert', { method: 'POST' });
+      const d = await r.json();
+      updateNewAlertBtn(d.enabled);
+      if (typeof showToast === 'function')
+        showToast(d.enabled ? '📥 New case alerts ON' : '📥 New case alerts OFF');
+    } catch (e) { console.error(e); }
+  };
+
+  // Load current state on page load
+  fetch('/api/monitor/new-alert-status')
+    .then(r => r.json())
+    .then(d => updateNewAlertBtn(d.enabled))
+    .catch(() => {});
+})();
+</script>
 </body>
 </html>

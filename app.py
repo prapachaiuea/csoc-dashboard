@@ -41,6 +41,7 @@ TOOLS = ['monitor', 'scraper', 'shift', 'weekly']
 
 state = {t: {'proc': None, 'running': False, 'logs': deque(maxlen=500),
               'subs': [], 'lock': threading.Lock()} for t in TOOLS}
+state['shift']['phases'] = {1: None, 2: None, 3: None}  # filename per phase when ready
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 def push(tool, msg):
@@ -95,6 +96,20 @@ def stop_tool(tool):
         if s['proc']:
             s['proc'].terminate()
 
+# ── IT Monitor config helpers ─────────────────────────────────────────────────
+_MONITOR_CONFIG = os.path.join(DIRS['monitor'], 'monitor_config.json')
+
+def _read_monitor_cfg():
+    try:
+        with open(_MONITOR_CONFIG, encoding='utf-8') as f:
+            return json.load(f)
+    except Exception:
+        return {'new_case_alert_enabled': True}
+
+def _write_monitor_cfg(cfg):
+    with open(_MONITOR_CONFIG, 'w', encoding='utf-8') as f:
+        json.dump(cfg, f, indent=2)
+
 # ── IT Monitor ────────────────────────────────────────────────────────────────
 @app.route('/api/monitor/start', methods=['POST'])
 def monitor_start():
@@ -110,6 +125,18 @@ def monitor_start():
 def monitor_stop():
     stop_tool('monitor')
     return jsonify({'ok': True})
+
+@app.route('/api/monitor/new-alert-status')
+def monitor_new_alert_status():
+    cfg = _read_monitor_cfg()
+    return jsonify({'enabled': cfg.get('new_case_alert_enabled', True)})
+
+@app.route('/api/monitor/toggle-new-alert', methods=['POST'])
+def monitor_toggle_new_alert():
+    cfg = _read_monitor_cfg()
+    cfg['new_case_alert_enabled'] = not cfg.get('new_case_alert_enabled', True)
+    _write_monitor_cfg(cfg)
+    return jsonify({'enabled': cfg['new_case_alert_enabled']})
 
 # ── PromptCare Scraper ────────────────────────────────────────────────────────
 @app.route('/api/scraper/run', methods=['POST'])
@@ -152,13 +179,55 @@ def scraper_tickets():
     return jsonify({'tickets': open(p, encoding='utf-8').read() if os.path.exists(p) else ''})
 
 # ── Shift Summary ─────────────────────────────────────────────────────────────
+def _update_phase_file(n):
+    out = os.path.join(DIRS['shift'], 'output')
+    files = glob.glob(os.path.join(out, f'*_phase{n}.xlsx'))
+    if files:
+        fname = os.path.basename(sorted(files, key=os.path.getmtime, reverse=True)[0])
+        state['shift']['phases'][n] = fname
+        push('shift', f'📥 Phase {n} ready → {fname}')
+
 @app.route('/api/shift/run', methods=['POST'])
 def shift_run():
+    body           = request.get_json(silent=True) or {}
+    date_override  = body.get('date')   # "YYYY-MM-DD" or None
+    shift_override = body.get('shift')  # "Day" | "Night" | None
+
     def run():
         push('shift', '🚀 Generating shift summary...')
-        rc = run_script('shift', [sys.executable, '-u',
-                        os.path.join(DIRS['shift'], 'main.py')], DIRS['shift'])
-        push('shift', f'__EXIT__{rc}')
+        state['shift']['phases'] = {1: None, 2: None, 3: None}
+
+        cmd = [sys.executable, '-u', os.path.join(DIRS['shift'], 'main.py')]
+        if date_override or shift_override:
+            import datetime as _dt
+            date_str = date_override or _dt.datetime.now().strftime('%Y-%m-%d')
+            hour_str = '23:00' if shift_override == 'Night' else '14:00'
+            test_dt  = f'{date_str} {hour_str}'
+            cmd += ['--test', test_dt]
+            push('shift', f'📅 Override → {date_str} | {shift_override or "auto-detect"} shift')
+
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            text=True, encoding='utf-8', errors='replace',
+            cwd=DIRS['shift'], env=_UTF8_ENV,
+        )
+        with state['shift']['lock']:
+            state['shift']['proc'] = proc
+        for line in iter(proc.stdout.readline, ''):
+            line = line.rstrip('\r\n')
+            if not line:
+                continue
+            phase_matched = False
+            for n in (1, 2, 3):
+                if line == f'__PHASE_{n}_DONE__':
+                    _update_phase_file(n)
+                    phase_matched = True
+                    break
+            if not phase_matched:
+                push('shift', line)
+        proc.wait()
+        push('shift', f'__EXIT__{proc.returncode}')
     ok = start_tool('shift', run)
     return jsonify({'ok': ok})
 
@@ -181,6 +250,23 @@ def shift_files():
     out = os.path.join(DIRS['shift'], 'output')
     files = sorted(glob.glob(os.path.join(out, '*.xlsx')), key=os.path.getmtime, reverse=True)
     return jsonify({'files': [os.path.basename(f) for f in files]})
+
+@app.route('/api/shift/phase-status')
+def shift_phase_status():
+    phases = state['shift'].get('phases', {1: None, 2: None, 3: None})
+    return jsonify({
+        'running': state['shift']['running'],
+        'phases': {str(k): v for k, v in phases.items()},
+    })
+
+@app.route('/api/shift/download/phase/<int:n>')
+def shift_download_phase(n):
+    fname = state['shift'].get('phases', {}).get(n)
+    if fname:
+        path = os.path.join(DIRS['shift'], 'output', fname)
+        if os.path.exists(path):
+            return send_file(path, as_attachment=True, download_name=fname)
+    return jsonify({'error': f'Phase {n} not ready yet'}), 404
 
 # ── Weekly Summary ────────────────────────────────────────────────────────────
 WEEKLY_STAGE1 = [
@@ -310,6 +396,17 @@ def restart():
     def do():
         time.sleep(1)
         subprocess.Popen(['wscript.exe', vbs], close_fds=True)
+    threading.Thread(target=do, daemon=True).start()
+    return jsonify({'ok': True})
+
+# ── Shutdown ──────────────────────────────────────────────────────────────────
+@app.route('/api/shutdown', methods=['POST'])
+def shutdown():
+    for tool in TOOLS:
+        stop_tool(tool)
+    def do():
+        time.sleep(0.5)
+        os._exit(0)
     threading.Thread(target=do, daemon=True).start()
     return jsonify({'ok': True})
 
